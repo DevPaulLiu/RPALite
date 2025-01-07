@@ -110,3 +110,8 @@ If you wish to contribute code to RPALite, feel free to submit a Pull Request. E
 - GitHub Repository: https://github.com/jieliu2000/RPALite
 - Gitee Repository: https://gitee.com/jieliu2000/rpalite
 - Gitcode Repository: https://gitcode.com/jieliu2000/rpalite
+
+## MacOs
+You need to go to System Preferences > Security & Privacy tab, select Accessibility from the left sidebar and ensure the terminal application/VS Code has access.
+
+also screen & system audio recording need to grant terminal/VS Code access.

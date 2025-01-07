@@ -2,24 +2,36 @@
 import random
 import tempfile
 import threading
-import PIL.Image
+import Quartz.CoreGraphics
+import mss
+import Quartz
+from PIL import Image, ImageGrab
 import numpy as np
 from robot.api.deco import keyword, library, not_keyword
 from robot.api import logger
-import uiautomation as auto
 from deprecated import deprecated
-import mouse as mouselib
-import PIL
-from pywinauto import mouse, keyboard, findwindows, Application
+from pynput.mouse import Controller, Button
+from pynput.keyboard import Key, Controller as KeyboardController
 import time
 import platform
+import keyboard
 import pyautogui
 import pyperclip
 import keyboard as keyboardlib
 import cv2
 from datetime import datetime
-from .image_handler import ImageHandler
+import subprocess
+from image_handler import ImageHandler
 import os
+from functools import wraps
+
+def windows_only(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if platform.system() != 'Windows':
+            raise NotImplementedError(f"The {func.__name__} function is only supported on Windows.")
+        return func(*args, **kwargs)
+    return wrapper
 
 @library(scope='GLOBAL', auto_keywords=True)
 class RPALite:
@@ -50,31 +62,30 @@ class RPALite:
         """
         self.platform = platform.system()
         self.debug_mode = debug_mode
-        if(self.platform != 'Windows'):
-            raise Exception('This version currently only supports Windows. Other platforms will be supported in the future.')
+        self.mouse_controller = Controller()
+        self.keyboard_controller = KeyboardController()
         self.image_handler = ImageHandler(debug_mode, languages)
         self.step_pause_interval = step_pause_interval
         self.screen_recording_thread = None
         self.screen_recording_file = None
         
 
-    def run_command(self, command, noblock = True):
+    def run_command(self, command, noblock=True):
         """
-        Runs a system command. The noblock parameter specify whether this function need to be blocked when executing the command.
+        Runs a system command. The noblock parameter specifies whether this function needs to be blocked when executing the command.
         
         Parameters
         ----------
         command : str
-            The command to be executed. This can be program file name (in the system path or full path), or any command that can be executed in the system command line.
+            The command to be executed. This can be a program file name (in the system path or full path), or any command that can be executed in the system command line.
         
         noblock : bool
-            Specifies whether this function need to be blocked when executing the command
+            Specifies whether this function needs to be blocked when executing the command
         """
-
-        if(noblock):
-            os.popen(command)
+        if noblock:
+            subprocess.Popen(command, shell=True)
         else:
-            os.system(command)
+            subprocess.run(command, shell=True, check=True)
         self.sleep()
         
         
@@ -163,7 +174,7 @@ class RPALite:
         if(location is None):
             return None
         else:
-            return self.image_handler.find_control_near_position(img, location[0])
+            return self.image_handler.find_control_near_position(img, location[0][0])
     
 
     def find_control_by_label(self, label):
@@ -197,6 +208,7 @@ class RPALite:
         size = pyautogui.size()
         return (size.width, size.height)
 
+    @windows_only
     def find_control(self, app, class_name=None, title=None, automate_id=None):
         '''
         Finds a control by the parameters. This function uses uiautomation module (https://github.com/yinkaisheng/Python-UIAutomation-for-Windows) to find the control and returns the client rect of the element
@@ -244,6 +256,7 @@ class RPALite:
 
         return (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
 
+    @windows_only
     def click_control(self, app, class_name=None, title=None, automate_id=None, click_position='center', button='left', double_click=False):
         """
         Find the center, left or right position of the control then click it.
@@ -274,7 +287,7 @@ class RPALite:
         if click_position == 'right':
             self.click_by_position(int(position[0]) + (position[2]) - 5, int(position[1]) + int(position[3]) // 2, button, double_click)
 
-    @not_keyword
+    @windows_only
     def find_control_by_process(self, process_id):
         '''
         Finds an uiautomation control by the parameters. This function uses uiautomation module (https://github.com/yinkaisheng/Python-UIAutomation-for-Windows) to find the top level control based on the process_id parameter.
@@ -295,7 +308,7 @@ class RPALite:
                 return win
         return None   
       
-    @not_keyword
+    @windows_only
     def build_element_params(self, title_re=None, class_name = None, title=None, automate_id=None, visible_only= None):
         params = {}
         if(title_re is not None and title_re != ""):
@@ -311,69 +324,18 @@ class RPALite:
 
         return params
     
-    def take_screenshot(self, all_screens = False, filename = None):
-        '''Take a screenshot and save it to a file. If the filename parameter is not specified, the screenshot will be saved to a file with a random name.
-        
-        Parameters
-        ----------
-        all_screens : bool
-            Whether to take screenshots of all screens. If set to False, only the current screen will be taken.
-        
-        filename : str
-            The filename to save the screenshot to. If not specified, this method will not save the screenshot to a file.
+    def take_screenshot(self):
+        """
+        Takes a screenshot of the entire screen.
         
         Returns
         -------
         PIL.Image
             The screenshot image.
-        '''
-
-        img = PIL.ImageGrab.grab(all_screens=False)
-        if filename is not None:
-            img.save(filename)
-        return img
-
-
-    @deprecated("This function has been deprecated, use wait_until_text_shown instead.")
-    def wait_until_text_exists(self, text, filter_args_in_parent=None, parent_control = None, search_in_image = None, timeout = 30):
-        '''
-        Wait until a specific text exists in the current screen. This function will return the location if the text exists, otherwise it will return None.
-        
-        Parameters
-        ----------
-        text : str
-            The text to wait for.
-            
-        filter_args_in_parent : dict
-            The filter arguments to filter the parent control. This is used to find the parent control of the text. If not specified, the parent control will be considered during search.
-        
-        parent_control : uiautomation control
-            The parent control to search in. If not specified, the function will search all controls.
-        
-        search_in_image : PIL.Image
-            The image to search in. If not specified, the function will take a screenshot and search in the screenshot.
-        
-        timeout : int
-            The timeout in seconds. If the text is not found within the timeout, an AssertionError will be raised.
-
-        Returns
-        -------
-        tuple
-            The location of the text in the screen. The location is a tuple of (x, y, width, height).
-
-        '''
-
-        start_time = datetime.now()
-        while(True):
-            location = self.find_text_positions(text, filter_args_in_parent, parent_control, search_in_image)
-            if(location is not None):
-                return location[0] 
-            else:
-                diff = datetime.now() - start_time
-                if(diff.seconds > timeout):
-                    raise AssertionError('Timeout waiting for text: ' + text)
-                self.sleep(1)
-                search_in_image = None
+        """
+        screenshot = pyautogui.screenshot()
+        # note, MacOS default screenshot is 2x scale, so we need to adjust the scale factor manually.
+        return self.adjust_image_scale(screenshot)
     
     def wait_until_text_shown(self, text, filter_args_in_parent=None, parent_control = None, search_in_image = None, timeout = 30):
         '''
@@ -518,7 +480,7 @@ class RPALite:
         else:
             return [loc[0] for loc in locations]
 
-
+    @windows_only
     def find_application(self, title=None, class_name = None):
         '''Find an application by its title or ClassName.'''
 
@@ -540,6 +502,7 @@ class RPALite:
             app = self.find_application(app_or_keyword, None)
         return app
 
+    @windows_only
     def close_app(self, app_or_keyword, force_quit = False):
         '''Close an application. The parameter could be the app instance or the app's title keyword. The force_quit parameter specify whether this function need to be forced quit just like what we did in task manager.'''
         app = self.get_app(app_or_keyword)
@@ -548,7 +511,7 @@ class RPALite:
         else:
             app.kill(not(force_quit))
 
-   
+    @windows_only
     def maximize_window(self, app_or_keyword, window_title_pattern = None):
         '''Maximize the window of the application.'''
         app = self.get_app(app_or_keyword)
@@ -565,7 +528,7 @@ class RPALite:
             wrapper.maximize()
             self.sleep()
 
-    
+    @windows_only
     def locate(self, location_description, parent_image = None, app = None):
         ''' Locate a control by a description. The description can be a string that is displayed on screen or a string of some elements' properties with a prefix.
         This function will work based on location_description's value based on these rules:
@@ -594,7 +557,7 @@ class RPALite:
         if(isinstance(location_description, str)):
             if location_description.startswith('image:'):
                 path = location_description.split('image:')[1]
-                img = PIL.Image.open(path)
+                img = Image.open(path)
                 if parent_image is None:
                     parent_image = self.take_screenshot()
                 return self.image_handler.find_image_location(img, parent_image)
@@ -608,7 +571,7 @@ class RPALite:
                 position = self.find_control(app, automate_id=automate_id)
                 return position
              
-            return self.wait_until_text_exists(location_description)
+            return self.wait_until_text_shown(location_description)
 
     def click(self, locator=None,  button='left', double_click= False, app = None):
         '''Click on a control. The parameter could be a locator or the control's text (like the button text or the field name)'''
@@ -646,7 +609,7 @@ class RPALite:
         '''         
         location = self.find_image_location(image)
         if(location is not None):
-                self.click_by_position(int(location[0]) + int(location[2]) // 2, int(location[1]) + int(location[3]) // 2, button, double_click)
+            self.click_by_position(int(location[0]) + int(location[2]) // 2, int(location[1]) + int(location[3]) // 2, button, double_click)
 
     def find_image_on_screen(self, image):
         '''Find an image in the current screen. This function will return the location if the image exists, otherwise it will return None.
@@ -680,12 +643,11 @@ class RPALite:
             The location of the image in the screen. The location is a tuple of (x, y, width, height).
         '''
         if isinstance(image, str):
-            image = PIL.Image.open(image)
-
+            image = self.adjust_image_scale(Image.open(image))
         if parent_image is None:
             parent_image = self.take_screenshot()
         elif isinstance(parent_image, str):
-            parent_image = PIL.Image.open(parent_image)
+            parent_image = self.adjust_image_scale(Image.open(parent_image))
 
         return self.image_handler.find_image_location(image, parent_image)
     
@@ -706,12 +668,11 @@ class RPALite:
             A list of locations of the image in the screen. Each location is a tuple of (x, y, width, height).
         '''
         if isinstance(image, str):
-            image = PIL.Image.open(image)
-
+            image = self.adjust_image_scale(Image.open(image))
         if parent_image is None:
             parent_image = self.take_screenshot()
         elif isinstance(parent_image, str):
-            parent_image = PIL.Image.open(parent_image)
+            parent_image = self.adjust_image_scale(Image.open(parent_image))
 
         return self.image_handler.find_all_image_locations(image, parent_image)
 
@@ -734,7 +695,7 @@ class RPALite:
         while(True):
             location = self.find_image_location(image, parent_image)
             if(location is not None):
-                return location[0] 
+                return location 
             else:
                 diff = datetime.now() - start_time
                 if(diff.seconds > timeout):
@@ -765,7 +726,7 @@ class RPALite:
                 sorted_locations = sorted(locations, key=lambda x: (x[0]-title_position[0])**2 + (x[1]-title_position[1])**2)
             else:
                 sorted_locations = [locations]
-            location = sorted_locations[0][0]
+            location = sorted_locations[0]
             self.click_by_position(location[0], location[1], button, double_click)
             self.sleep()
         self.sleep()
@@ -775,7 +736,7 @@ class RPALite:
         Clicks the center position of a string on screen. 
         '''
         logger.debug('Click by text:', text)
-        location = self.wait_until_text_exists(text, filter_args_in_parent)
+        location = self.wait_until_text_shown(text, filter_args_in_parent)
         if(location is not None and location[0]):
             self.click_by_position(int(location[0]) + int(location[2]) // 2, int(location[1]) + int(location[3]) // 2, button, double_click)
         self.sleep()
@@ -831,20 +792,44 @@ class RPALite:
         sleep: float
             The time to sleep in seconds after scrolling. 
         '''
-        mouselib.wheel(times)
+        if platform.system() == 'Darwin':
+            pyautogui.scroll(-times)
+        else: 
+            pyautogui.scroll(times)
         sleep_seconds = sleep if sleep is not None else self.step_pause_interval
         self.sleep(sleep_seconds)
         pass
 
     def mouse_move(self, x:int, y:int):
-        mouse.move((x, y))
+        self.mouse_controller.position = (x, y)
+        self.sleep()
+    
+    def mouse_click(self, x: int, y: int, button='left', double_click=False):
+        '''
+        Perform a single click at the specified position.
+        '''
+        # Map button string to pynput Button
+        button_map = {
+            'left': Button.left,
+            'right': Button.right,
+            'middle': Button.middle
+        }
+        pynput_button = button_map.get(button, Button.left)
+
+        # Move to the position before clicking
+        self.mouse_controller.position = (x, y)
+        self.sleep()
+        if double_click:
+            self.mouse_controller.click(pynput_button, 2)
+        else:
+            self.mouse_controller.click(pynput_button)  # Single click
         self.sleep()
         
     def move_mouse_to_the_middle_of_text(self, text, filter_args_in_parent=None, parent_control=None, search_in_image=None, timeout=30):
         '''
         Move mouse to the center position of a string on screen. 
         '''
-        position = self.wait_until_text_exists(text, filter_args_in_parent, parent_control, search_in_image, timeout)
+        position = self.wait_until_text_shown(text, filter_args_in_parent, parent_control, search_in_image, timeout)
         self.mouse_move(int(position[0]) + int(position[2]) // 2, int(position[1]) + int(position[3]) // 2)
 
     def click_by_position(self, x:int, y:int, button='left', double_click=False):
@@ -869,33 +854,42 @@ class RPALite:
             Whether to perform a double click. Default is False.
         '''
         logger.debug('Click by position: {}, {}, {}, {}'.format(x, y, type(x), type(y)))
-        mouse.move((x, y))
-        self.sleep(1)
-        if(double_click):
-            mouse.double_click(button, (x, y))
-        else:
-            mouse.click(button, (x,y))
+        self.mouse_click(x, y, button, double_click)
         self.sleep()
 
-    def send_keys(self, keys):
+    def send_keys(self, shortcut):
         '''
-        Simulate the keyboard action to send keys. It uses pywinauto's send_keys method. See https://pywinauto.readthedocs.io/en/latest/code/pywinauto.keyboard.html for details.
+        Simulate the keyboard action to send shortcuts.
 
-        You can use any Unicode characters (on Windows) and some special keys listed below.
-
-        Available key codes: 
-
-        {SCROLLLOCK}, {VK_SPACE}, {VK_LSHIFT}, {VK_PAUSE}, {VK_MODECHANGE},{BACK}, {VK_HOME}, {F23}, {F22}, {F21}, {F20}, {VK_HANGEUL}, {VK_KANJI},{VK_RIGHT}, {BS}, {HOME}, {VK_F4}, {VK_ACCEPT}, {VK_F18}, {VK_SNAPSHOT},{VK_PA1}, {VK_NONAME}, {VK_LCONTROL}, {ZOOM}, {VK_ATTN}, {VK_F10}, {VK_F22},{VK_F23}, {VK_F20}, {VK_F21}, {VK_SCROLL}, {TAB}, {VK_F11}, {VK_END},{LEFT}, {VK_UP}, {NUMLOCK}, {VK_APPS}, {PGUP}, {VK_F8}, {VK_CONTROL},{VK_LEFT}, {PRTSC}, {VK_NUMPAD4}, {CAPSLOCK}, {VK_CONVERT}, {VK_PROCESSKEY},{ENTER}, {VK_SEPARATOR}, {VK_RWIN}, {VK_LMENU}, {VK_NEXT}, {F1}, {F2},{F3}, {F4}, {F5}, {F6}, {F7}, {F8}, {F9}, {VK_ADD}, {VK_RCONTROL},{VK_RETURN}, {BREAK}, {VK_NUMPAD9}, {VK_NUMPAD8}, {RWIN}, {VK_KANA},{PGDN}, {VK_NUMPAD3}, {DEL}, {VK_NUMPAD1}, {VK_NUMPAD0}, {VK_NUMPAD7},{VK_NUMPAD6}, {VK_NUMPAD5}, {DELETE}, {VK_PRIOR}, {VK_SUBTRACT}, {HELP},{VK_PRINT}, {VK_BACK}, {CAP}, {VK_RBUTTON}, {VK_RSHIFT}, {VK_LWIN}, {DOWN},{VK_HELP}, {VK_NONCONVERT}, {BACKSPACE}, {VK_SELECT}, {VK_TAB}, {VK_HANJA},{VK_NUMPAD2}, {INSERT}, {VK_F9}, {VK_DECIMAL}, {VK_FINAL}, {VK_EXSEL},{RMENU}, {VK_F3}, {VK_F2}, {VK_F1}, {VK_F7}, {VK_F6}, {VK_F5}, {VK_CRSEL},{VK_SHIFT}, {VK_EREOF}, {VK_CANCEL}, {VK_DELETE}, {VK_HANGUL}, {VK_MBUTTON},{VK_NUMLOCK}, {VK_CLEAR}, {END}, {VK_MENU}, {SPACE}, {BKSP}, {VK_INSERT},{F18}, {F19}, {ESC}, {VK_MULTIPLY}, {F12}, {F13}, {F10}, {F11}, {F16},{F17}, {F14}, {F15}, {F24}, {RIGHT}, {VK_F24}, {VK_CAPITAL}, {VK_LBUTTON},{VK_OEM_CLEAR}, {VK_ESCAPE}, {UP}, {VK_DIVIDE}, {INS}, {VK_JUNJA},{VK_F19}, {VK_EXECUTE}, {VK_PLAY}, {VK_RMENU}, {VK_F13}, {VK_F12}, {LWIN},{VK_DOWN}, {VK_F17}, {VK_F16}, {VK_F15}, {VK_F14}
-        ~ is a shorter alias for {ENTER}
-
-        Modifiers:
-
-        * '+': {VK_SHIFT}
-        * '^': {VK_CONTROL}
-        * '%': {VK_MENU} a.k.a. Alt key
+        Parameters
+        ----------
+        shortcut : str
+            The shortcut to be sent. E.g., 'ctrl+c', 'command+3', 'shift+a'
         '''
-        keyboard.send_keys(keys)
-        self.sleep()
+        key_map = {
+            'ctrl': Key.ctrl,
+            '^': Key.ctrl,
+            'shift': Key.shift,
+            '+': Key.shift,
+            'alt': Key.alt,
+            '%': Key.alt,
+            'cmd': Key.cmd if self.platform == 'Darwin' else Key.cmd_l,
+            'command': Key.cmd if self.platform == 'Darwin' else Key.cmd_l,
+            'enter': Key.enter,
+            'tab': Key.tab,
+            'esc': Key.esc,
+            'space': Key.space,
+            'backspace': Key.backspace,
+            'delete': Key.delete,
+            'up': Key.up,
+            'down': Key.down,
+            'left': Key.left,
+            'right': Key.right,
+        }
+
+        keys = shortcut.lower().split('+')
+        with self.keyboard_controller.pressed(*[key_map.get(k, k) for k in keys]):
+            self.sleep()
 
 
     def input_text(self, text, seconds = 0):
@@ -908,7 +902,7 @@ class RPALite:
         text : str
             Text to type
         '''
-        keyboardlib.write(text, delay=0.2)
+        self.keyboard_controller.type(text)
         self.sleep(seconds)
 
     def get_text_field_value(self, field_name):
@@ -940,7 +934,6 @@ class RPALite:
             
         return result
 
-
     def enter_in_field(self, field_name, text):
         '''
         Enters text in a field identified by field_name paramete.
@@ -956,7 +949,7 @@ class RPALite:
     
         '''
         img = self.take_screenshot()
-        location = self.wait_until_text_exists(field_name)
+        location = self.wait_until_text_shown(field_name)
         if(location is None):
             logger.error('Cannot find field:', field_name)
             return
@@ -1037,10 +1030,62 @@ class RPALite:
 
         # Release the Video writer
         out.release()
-
+    
+    @not_keyword
+    def adjust_image_scale(self, image):
+        '''
+        Adjusts the scale of the image based on the screen's scale factor.
+        
+        Parameters
+        ----------
+        image : PIL.Image
+            The image to be adjusted.
+        
+        Returns
+        -------
+        PIL.Image
+            The adjusted image.
+        '''
+        scale_factor = self.get_scale_factor()
+        if scale_factor > 1:
+            width, height = image.size
+            image = image.resize((int(width / scale_factor), int(height / scale_factor)), Image.Resampling.LANCZOS)
+        return image
+    
     def show_desktop(self):
         '''
         Shows desktop and minimizes all windows.
         '''
-        if(self.platform == 'Windows'):
-            self.send_keys('{VK_LWIN down}D{VK_LWIN}')
+        if self.platform == 'Windows':
+            self.keyboard_controller.press(Key.cmd)
+            self.keyboard_controller.press('d')
+            self.keyboard_controller.release('d')
+            self.keyboard_controller.release(Key.cmd)
+        elif self.platform == 'Linux':
+            self.keyboard_controller.press(Key.cmd)
+            self.keyboard_controller.press('d')
+            self.keyboard_controller.release('d')
+            self.keyboard_controller.release(Key.cmd)
+        elif self.platform == 'Darwin':
+            self.keyboard_controller.press(Key.cmd)
+            self.keyboard_controller.press(Key.alt)
+            self.keyboard_controller.press('h')
+            self.keyboard_controller.release('h')
+            self.keyboard_controller.release(Key.alt)
+            self.keyboard_controller.press(Key.cmd)
+            self.keyboard_controller.press('m')
+            self.keyboard_controller.release('m')
+            self.keyboard_controller.release(Key.cmd)
+
+    @not_keyword
+    def get_scale_factor(self):
+            '''
+            Returns the scale factor of the screen.
+            '''
+            if self.platform == "Darwin":
+                display_id = Quartz.CGMainDisplayID()
+                screen = Quartz.CGDisplayScreenSize(display_id)
+                pixel_width = Quartz.CGDisplayPixelsWide(display_id)
+                scale_factor = pixel_width / screen.width
+                return min(scale_factor, 2)
+            return 1

@@ -1,10 +1,12 @@
 from datetime import datetime
-from RPALite import RPALite
 import random
 import pytest
 import os
 import logging
+import sys
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
+from RPALite import RPALite
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

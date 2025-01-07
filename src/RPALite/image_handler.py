@@ -66,7 +66,6 @@ class ImageHandler:
             cv2.waitKey(self.debug_image_show_milliseconds)
 
         gray = cv2.cvtColor(np.array(parentImage), cv2.COLOR_BGR2GRAY)
-        
         target = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2GRAY)
         
         # Use template matching to find the location of the image in the parent image
@@ -77,10 +76,13 @@ class ImageHandler:
         locations = np.where(result >= 0.9)
         h, w = target.shape
 
-        # Sort and convert the locations to a list of tuples including height and width
-        sorted_locations = sorted([(pt[0], pt[1], w, h) for pt in zip(*locations[::-1])], key=lambda y: y[1])
+        # Convert the locations to a list of rectangles
+        rectangles = [(pt[0], pt[1], w, h) for pt in zip(*locations[::-1])]
 
-        return sorted_locations
+        # Apply non-maximum suppression to filter out near-duplicate positions
+        rectangles, _ = cv2.groupRectangles(rectangles, groupThreshold=1, eps=0.5)
+
+        return rectangles
         
     def find_text_in_array(self, text, arrays, windows):
         '''
@@ -166,7 +168,7 @@ class ImageHandler:
         '''
         if self.debug_mode:
             cv2.imshow('shapes', np.array(image)) 
-            cv2.waitKey(0)
+            cv2.waitKey(self.debug_image_show_milliseconds)
         
         arr = self.read_text(image)
         
