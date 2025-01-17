@@ -1084,8 +1084,14 @@ class RPALite:
             '''
             if self.platform == "Darwin":
                 display_id = Quartz.CGMainDisplayID()
-                screen = Quartz.CGDisplayScreenSize(display_id)
-                pixel_width = Quartz.CGDisplayPixelsWide(display_id)
-                scale_factor = pixel_width / screen.width
-                return min(scale_factor, 2)
+                display_mode = Quartz.CGDisplayCopyDisplayMode(display_id)
+                pixel_width = Quartz.CGDisplayModeGetPixelWidth(display_mode)
+                pixel_height = Quartz.CGDisplayModeGetPixelHeight(display_mode)
+                bounds = Quartz.CGDisplayBounds(display_id)
+                point_width = bounds.size.width
+                point_height = bounds.size.height
+                print(f"Screen width in points: {point_width}, Pixel width: {pixel_width}")
+                print(f"Screen height in points: {point_height}, Pixel height: {pixel_height}")
+                scale_factor = pixel_width / point_width
+                return scale_factor
             return 1
